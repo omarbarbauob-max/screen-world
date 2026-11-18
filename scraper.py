@@ -8,7 +8,7 @@ import requests
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_SERVICE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
 TMDB_API_KEY = os.environ["TMDB_API_KEY"]
-TMDB_BASE = (os.environ.get("TMDB_BASE") or "https://api.themoviedb.org/3").rstrip("/")  # أو رابط Cloudflare worker
+TMDB_BASE = (os.environ.get("TMDB_BASE") or "https://api.themoviedb.org/3").rstrip("/")
 LICENSED_FILE = os.environ.get("LICENSED_FILE") or "licensed_videos.json"
 
 HEADERS = {
@@ -33,8 +33,8 @@ def upsert(table, rows, conflict):
         r.raise_for_status()
 
 
-def sync_trending():
-    """1) أحدث الأفلام الرائجة من TMDB (المعرّف هنا TMDB id فعلاً)."""
+def sync_trending_movies():
+    """1) أحدث الأفلام الرائجة من TMDB بكامل تفاصيلها."""
     r = requests.get(
         f"{TMDB_BASE}/trending/movie/week",
         params={"api_key": TMDB_API_KEY, "language": "ar"},
@@ -42,15 +42,48 @@ def sync_trending():
     )
     r.raise_for_status()
     rows = [
-        {"tmdb_id": m["id"], "title": m.get("title"), "type": "movie"}
+        {
+            "tmdb_id": m["id"],
+            "title": m.get("title") or m.get("original_title"),
+            "original_title": m.get("original_title"),
+            "overview": m.get("overview") or "",
+            "poster_path": m.get("poster_path"),
+            "type": "movie",
+        }
         for m in r.json().get("results", [])
     ]
     upsert("movies", rows, "tmdb_id")
     print(f"تمت مزامنة {len(rows)} فيلم.")
 
 
+def sync_trending_series():
+    """2) أحدث المسلسلات الرائجة من TMDB بكامل تفاصيلها."""
+    r = requests.get(
+        f"{TMDB_BASE}/trending/tv/week",
+        params={"api_key": TMDB_API_KEY, "language": "ar"},
+        timeout=15,
+    )
+    r.raise_for_status()
+    rows = []
+    for s in r.json().get("results", []):
+        series_name = s.get("name") or s.get("original_name") or "بدون عنوان"
+        rows.append(
+            {
+                "tmdb_id": s["id"],
+                "name": series_name,
+                "title": series_name,
+                "original_title": s.get("original_name"),
+                "overview": s.get("overview") or "",
+                "poster_path": s.get("poster_path"),
+                "type": "tv",
+            }
+        )
+    upsert("series", rows, "tmdb_id")
+    print(f"تمت مزامنة {len(rows)} مسلسل.")
+
+
 def sync_licensed_links():
-    """2) روابط التشغيل: فقط من ملف لمحتوى تملكه أنت (MP4/M3U8 على استضافتك).
+    """3) روابط التشغيل: فقط من ملف لمحتوى تملكه أنت (MP4/M3U8 على استضافتك).
     شكل الملف: {"603": "https://your-cdn/603.m3u8", ...}
     """
     if not os.path.exists(LICENSED_FILE):
@@ -78,5 +111,17 @@ def sync_licensed_links():
 
 
 if __name__ == "__main__":
-    sync_trending()
-    sync_licensed_links()
+    failed = False
+    for step_name, step_fn in [
+        ("مزامنة الأفلام", sync_trending_movies),
+        ("مزامنة المسلسلات", sync_trending_series),
+        ("مزامنة الروابط", sync_licensed_links),
+    ]:
+        try:
+            step_fn()
+        except Exception as e:
+            failed = True
+            print(f"خطأ في {step_name}: {e}", file=sys.stderr)
+
+    if failed:
+        sys.exit(1)

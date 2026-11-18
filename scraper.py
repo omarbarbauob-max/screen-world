@@ -8,8 +8,8 @@ import requests
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_SERVICE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
 TMDB_API_KEY = os.environ["TMDB_API_KEY"]
-TMDB_BASE = os.environ.get("TMDB_BASE", "https://api.themoviedb.org/3")
-LICENSED_FILE = os.environ.get("LICENSED_FILE", "licensed_videos.json")
+TMDB_BASE = (os.environ.get("TMDB_BASE") or "https://api.themoviedb.org/3").rstrip("/")  # أو رابط Cloudflare worker
+LICENSED_FILE = os.environ.get("LICENSED_FILE") or "licensed_videos.json"
 
 HEADERS = {
     "apikey": SUPABASE_SERVICE_KEY,
